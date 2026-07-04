@@ -106,6 +106,8 @@ def test_run_mixed_success_and_permanent_failure(tmp_path):
     failed_path = p.parent / (p.name + ".failed.txt")
     assert failed_path.exists()
     assert "200" in failed_path.read_text(encoding="utf-8")
+    assert result.failed_path is not None
+    assert result.failed_path == failed_path
 
 
 def test_run_circuit_break_on_consecutive_transient(tmp_path):
@@ -128,6 +130,8 @@ def test_run_circuit_break_on_consecutive_transient(tmp_path):
     assert len(result.remaining) == 3  # THRESHOLD failed, 3 unattempted
     remaining_path = p.parent / (p.name + ".remaining.txt")
     assert remaining_path.exists()
+    assert result.remaining_path is not None
+    assert result.remaining_path == remaining_path
 
 
 def test_run_permanent_failure_resets_transient_counter(tmp_path):

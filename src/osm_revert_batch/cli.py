@@ -83,16 +83,18 @@ def main(argv: list[str] | None = None) -> int:
         # parse_input raises ValueError with line-numbered message
         print(f"error: {e}", file=sys.stderr)
         return 2
+    except OSError as e:
+        # sidecar file / out_dir I/O failure (permission, full disk, etc.)
+        print(f"error: I/O failure: {e}", file=sys.stderr)
+        return 2
 
     log = lambda msg: print(msg, file=sys.stderr)
     _print_summary(result, log)
 
-    if result.failures:
-        failed_path = args.input_file.with_suffix(args.input_file.suffix + ".failed.txt")
-        log(f"Wrote {failed_path}")
-    if result.aborted and result.remaining:
-        remaining_path = args.input_file.with_suffix(args.input_file.suffix + ".remaining.txt")
-        log(f"Wrote {remaining_path}")
+    if result.failed_path is not None:
+        log(f"Wrote {result.failed_path}")
+    if result.remaining_path is not None:
+        log(f"Wrote {result.remaining_path}")
 
     if result.aborted:
         return 3

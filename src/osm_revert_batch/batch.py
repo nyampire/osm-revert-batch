@@ -48,6 +48,8 @@ class RunResult:
     aborted: bool = False
     aborted_at: tuple[int, int] | None = None  # (line_no, cs_id)
     abort_reason: str | None = None
+    failed_path: Path | None = None
+    remaining_path: Path | None = None
 
 
 def build_tags(cs_id: int, user: str, user_comment: str | None) -> dict[str, str]:
@@ -166,6 +168,7 @@ def run(
             success_count=result.success,
             failures=result.failures,
         )
+        result.failed_path = failed_path
     if result.aborted and result.remaining:
         remaining_path = options.input_file.with_suffix(options.input_file.suffix + ".remaining.txt")
         write_remaining_txt(
@@ -176,5 +179,6 @@ def run(
             reason=result.abort_reason or "unknown",
             remaining=result.remaining,
         )
+        result.remaining_path = remaining_path
 
     return result

@@ -73,6 +73,19 @@ Verify:
 - Exit code 1.
 - The failed ID is NOT in `/tmp/redacted.txt.done.txt`.
 
+## Note: Ctrl+C timing
+
+If you hit Ctrl+C during an active upload, the tool aborts and writes
+`<input>.remaining.txt` with everything from the interrupted changeset
+onward. There is a narrow window where the upload succeeded on OSM but
+`<input>.done.txt` was not yet appended — if this happens, re-running
+with the remaining file will attempt to revert the same changeset again.
+
+`simple_revert` produces an empty diff for the second attempt (nothing to
+revert), so the retry is harmless — but if you're worried, cross-check
+`<input>.done.txt` against your OSM changeset history before rerunning
+after an abort.
+
 ## Cleanup
 
 Delete the sidecar files if you don't need them:
