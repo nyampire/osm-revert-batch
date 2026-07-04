@@ -63,7 +63,7 @@ For input `changesets.txt`:
 
 | Code | Meaning |
 |---|---|
-| 0 | All processed IDs succeeded (differences skipped included) |
+| 0 | All processed IDs succeeded (including no-op reverts that had no diff to apply) |
 | 1 | Ran to completion but 1+ failures |
 | 2 | Pre-run error (missing input, parse failure, OAuth denied) |
 | 3 | Aborted (circuit breaker or Ctrl+C); `.remaining.txt` written |

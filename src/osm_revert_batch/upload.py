@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 from simple_revert.common import (
-    HTTPError,
     auth_request,
     changes_to_osc,
     changeset_xml,
@@ -50,9 +49,8 @@ def upload_changes_with_auth(
             "POST",
             data=osc,
         )
-    except HTTPError as e:
-        upload_exc = e
     except BaseException as e:
+        # capture upload failure; attempt best-effort close before re-raising
         upload_exc = e
 
     # 3. Best-effort close (swallow errors)

@@ -3,9 +3,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-import requests
-
 from simple_revert.common import HTTPError, RevertError
 
 from osm_revert_batch.batch import (

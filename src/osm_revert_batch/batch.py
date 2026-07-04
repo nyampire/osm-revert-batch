@@ -6,8 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-import requests
-from simple_revert.common import HTTPError, RevertError, changes_to_osc
+from simple_revert.common import changes_to_osc
 from simple_revert.simple_revert import (
     download_changesets as _real_download_changesets,
     revert_changes as _real_revert_changes,

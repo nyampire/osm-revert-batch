@@ -24,8 +24,6 @@ def is_transient(exc: BaseException) -> bool:
         if m:
             return _http_code_is_transient(int(m.group(1)))
         return False
-    if isinstance(exc, (requests.ConnectionError, requests.Timeout)):
-        return True
     if isinstance(exc, requests.RequestException):
         return True
     return False
