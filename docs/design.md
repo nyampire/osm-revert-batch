@@ -30,6 +30,9 @@ Python 側で塞ぐバッチ処理レイヤーを提供する。
 - 失敗した changeset は入力と同形式の `<input>.failed.txt` に書き出し、
   そのまま再実行の入力にできる
 - `--dry-run` で OAuth 抜き、changeset ごとの `.osc` ファイル出力のみ
+- 一時的エラー (HTTP 429 / 5xx / ネット断) は自動リトライ、雪崩は circuit
+  breaker で中断、未処理の changeset は `<input>.remaining.txt` に保存して
+  中断地点から再開できる
 
 ### やらないこと (YAGNI)
 
@@ -99,17 +102,22 @@ osm-revert-batch <input_file> [--comment "..."] [--dry-run] [--out-dir DIR]
 ## 実行フロー
 
 ```
-1. parse input file → [(line_no, changeset_id), ...]
+1. parse input file → items = [(line_no, changeset_id), ...]
 2. if not dry_run:
        auth = read_auth()          # ここで 1 回だけブラウザ認可
-3. for each (line_no, cs_id) in order:
+3. consecutive_transient = 0
+   for i, (line_no, cs_id) in enumerate(items):
        try:
-           diffs, ch_users = download_changesets([cs_id], print_status)
+           # download と upload は with_retry() でラップ (下の "リトライ" 節参照)
+           diffs, ch_users = with_retry(lambda: download_changesets(
+               [cs_id], print_status))
            if not diffs:
-               record success('no changes to revert'); continue
-           changes = revert_changes(diffs, print_status)
+               record success('no changes to revert')
+               consecutive_transient = 0; continue
+           changes = revert_changes(diffs, print_status)  # API 呼ばない、純計算
            if not changes:
-               record success('no changes to upload'); continue
+               record success('no changes to upload')
+               consecutive_transient = 0; continue
 
            if dry_run:
                path = out_dir / f'{cs_id}.osc'
@@ -117,19 +125,109 @@ osm-revert-batch <input_file> [--comment "..."] [--dry-run] [--out-dir DIR]
                record success(f'dry-run wrote {path}')
            else:
                tags = build_tags(cs_id, ch_users[cs_id], user_comment)
-               upload_changes_with_auth(auth, changes, tags)  # 失敗時は例外
+               with_retry(lambda: upload_changes_with_auth(auth, changes, tags))
                record success('uploaded')
+           consecutive_transient = 0
        except RevertError as e:
            record failure(e.message)
+           consecutive_transient = 0        # 本質的失敗はカウントしない
        except HTTPError as e:
            record failure(f'HTTP {e.code}: {e.message[:200]}')
+           consecutive_transient = consecutive_transient + 1 if is_transient(e) else 0
+       except (ConnectionError, Timeout) as e:
+           record failure(f'Network: {e}')
+           consecutive_transient += 1
        except Exception as e:
            record failure(f'Unexpected: {type(e).__name__}: {e}')
+           consecutive_transient = 0
 
-4. print summary to stderr
-5. if failures:
-       write <input>.failed.txt (same format, # FAIL: reason header per ID)
-6. exit code: 0 if all succeeded else 1
+       if consecutive_transient >= CIRCUIT_BREAKER_THRESHOLD:
+           remaining = [cs for _, cs in items[i+1:]]
+           record circuit_break(reason='transient error threshold', remaining=remaining)
+           break
+   # 例外的パス: KeyboardInterrupt は try 外で catch し、未処理を remaining に
+
+4. print summary to stderr (success / failure / remaining の 3 カテゴリ)
+5. if failures:  write <input>.failed.txt
+   if remaining: write <input>.remaining.txt
+6. exit code:
+     - 0: 全件成功 (差分なし含む)
+     - 1: 走り切ったが 1 件以上失敗
+     - 3: 中断 (circuit break or KeyboardInterrupt)、remaining あり
+```
+
+## リトライと circuit breaker
+
+### 定数
+
+| 名前 | 値 | 意味 |
+|---|---|---|
+| `MAX_RETRIES` | 3 | 1 件あたりの最大リトライ回数 |
+| `BASE_BACKOFF_SECONDS` | 1.0 | exponential backoff の初期値 (1, 2, 4, 8 …) |
+| `MAX_BACKOFF_SECONDS` | 60.0 | backoff の上限 |
+| `CIRCUIT_BREAKER_THRESHOLD` | 5 | 連続 transient error 何件で中断するか |
+
+まずは code 内の module-level 定数として書く。CLI flag への昇格は必要になってから。
+
+### transient error の定義
+
+- `HTTPError` のうち:
+  - `code == 429` (Too Many Requests)
+  - `500 <= code < 600` (サーバ側の一時障害)
+- `requests.ConnectionError` / `requests.Timeout` / `requests.RequestException`
+  のうち上記に含まれないもの (ネットワーク断・タイムアウト)
+
+**含めないもの** (即失敗、リトライしない、circuit にもカウントしない):
+
+- `HTTPError` で 4xx かつ 429 以外 (400 / 403 redaction / 404 等の永続的失敗)
+- `RevertError` (redaction / structural change 等、本質的に revert 不能)
+
+### `with_retry(fn: Callable) -> T`
+
+```
+attempts = 0
+while True:
+    try:
+        return fn()
+    except Exception as e:
+        if not is_transient(e) or attempts >= MAX_RETRIES:
+            raise
+        wait = retry_after_header_or_backoff(e, attempts)
+        wait = min(wait, MAX_BACKOFF_SECONDS)
+        log to stderr: "transient error {short(e)}, retry in {wait}s"
+        time.sleep(wait)
+        attempts += 1
+```
+
+- HTTP 429 で `Retry-After` ヘッダが付いていればそれを使う。無ければ
+  `BASE_BACKOFF_SECONDS * (2 ** attempts)` (= 1, 2, 4 秒)
+- MAX_RETRIES を使い切っても transient なら例外を上位に投げ、上位ループが
+  circuit breaker カウンタを進める
+
+### circuit breaker
+
+- 連続 `CIRCUIT_BREAKER_THRESHOLD` (=5) 件、transient error でリトライも
+  尽きた changeset があれば中断
+- 「成功」または「非 transient な失敗 (RevertError / 4xx 等)」を挟むと
+  カウンタは 0 にリセット
+- 中断時は `<input>.remaining.txt` に **その中断時点でまだループに入っていない
+  changeset ID を** 同形式で書き出す。中断のトリガーになった changeset 自体は
+  すでに `.failed.txt` に入っているので remaining には含めない
+- `KeyboardInterrupt` (Ctrl+C) も circuit break と同じ経路: 現在処理中の
+  changeset の後片付け (途中の changeset があれば close) をしたら
+  remaining を書き出して exit code 3
+
+### remaining.txt のフォーマット
+
+```
+# generated by osm-revert-batch on 2026-07-04 12:34:56
+# aborted after 5 consecutive transient errors at line 42 (changeset 99999)
+# 58 changesets remaining, resume by running:
+#   osm-revert-batch changesets.txt.remaining.txt
+99999
+100000
+100001
+...
 ```
 
 ## 主要関数
@@ -188,15 +286,23 @@ osm-revert-batch <input_file> [--comment "..."] [--dry-run] [--out-dir DIR]
 
 `# FAIL:` は通常のコメント (`#`) 扱いなので、そのまま再実行の入力にできる。
 
+### `write_remaining_txt(path: Path, aborted_line_no: int, aborted_cs_id: int, remaining: list[int])`
+
+circuit break 時に未処理の changeset ID を同形式で書き出す。ヘッダで中断
+理由と再開コマンド例を残す（上の "remaining.txt のフォーマット" 参照）。
+
 ## エラー分類マトリクス
 
-| 由来 | 発生タイミング | classify 出力 |
-|---|---|---|
-| redaction | `download_changesets` 中に HTTP 403 | `Cannot revert redactions, see version N at ...` |
-| way/relation の member 変更 | `revert_changes` 中の `apply_diff` | `Members for way 12345 were changed, cannot roll that back` |
-| changeset そのものの download 失敗 | `download_changesets` の api_request | `Failed to download changeset 12345: ...` |
-| upload 側 412 | `upload_changes_with_auth` | `HTTP 412: ...`（本家の pass 分岐を潰した結果） |
-| その他 API 5xx / ネットワーク | `upload_changes_with_auth` | `HTTP {code}: ...` or `Unexpected: ...` |
+| 由来 | 発生タイミング | classify 出力 | transient? |
+|---|---|---|---|
+| redaction | `download_changesets` 中に HTTP 403 | `Cannot revert redactions, see version N at ...` | no |
+| way/relation の member 変更 | `revert_changes` 中の `apply_diff` | `Members for way 12345 were changed, cannot roll that back` | no |
+| changeset そのものの download 失敗 (404 等) | `download_changesets` の api_request | `Failed to download changeset 12345: ...` | no |
+| upload 側 412 | `upload_changes_with_auth` | `HTTP 412: ...`（本家の pass 分岐を潰した結果） | no |
+| **HTTP 429 レート制限** | download / upload | `HTTP 429: ...` (リトライで解消しなかった場合) | **yes** |
+| **HTTP 5xx** | download / upload | `HTTP {code}: ...` (リトライで解消しなかった場合) | **yes** |
+| **ネットワーク断 / timeout** | どこでも | `Network: {e}` | **yes** |
+| その他予期せぬ例外 | どこでも | `Unexpected: {type}: {e}` | no |
 
 ## テスト方針
 
@@ -237,11 +343,16 @@ E2E を自動化しない理由: OSM 本番 API に副作用を残すため、CI
 | コード | 意味 |
 |---|---|
 | 0 | 全 changeset が「成功」 or 「差分なし (`no changes to revert/upload`)」 |
-| 1 | 1 件以上失敗 |
+| 1 | 1 件以上失敗、ただし最後まで走り切った |
 | 2 | 実行前エラー（入力ファイル無し / パース失敗 / `read_auth()` 失敗） |
+| 3 | 途中で circuit break / KeyboardInterrupt → `<input>.remaining.txt` 生成 |
 
 `read_auth()` は step 2 で呼ぶ。ここで例外が飛んだ場合は catch せず、
 main で `SystemExit(2)` に変換して終了する（changeset のループには入らない）。
+
+exit 1 と exit 3 の違い: **exit 1 は最後まで走った結果 (`.failed.txt` が
+"確定した" 失敗一覧)**、**exit 3 は中断状態 (`.remaining.txt` に未処理あり、
+`.failed.txt` は中断時点までの内容)**。再実行時に見るべきファイルが違う。
 
 ## 未確定事項
 
