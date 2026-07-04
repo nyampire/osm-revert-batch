@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "osm-revert-batch"
+version = "0.1.0"
+description = "Batch wrapper around simple_revert with retry, skip-done, and resume"
+readme = "README.md"
+requires-python = ">=3.12"
+license = {text = "ISC"}
+authors = [{name = "nyampire"}]
+dependencies = [
+    "simple_revert>=1.2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7",
+]
+
+[project.scripts]
+osm-revert-batch = "osm_revert_batch.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
