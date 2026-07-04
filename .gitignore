@@ -9,3 +9,8 @@ dist/
 # runtime output
 osc-out/
 *.failed.txt
+*.remaining.txt
+*.done.txt
+
+# sdd ledger
+.superpowers/
