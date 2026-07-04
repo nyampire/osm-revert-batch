@@ -62,7 +62,11 @@ osm-revert-batch/
 
 ## 依存
 
-- Python 3.9+
+- Python 3.11+ (3.12 / 3.13 でも動作)
+  - 3.11 で入った PEP 654 (exception groups) と PEP 657 (きめ細かい traceback
+    位置情報) が OAuth / HTTP エラー追跡と相性が良い
+  - spec 内で `list[tuple[int, int]]` 等の PEP 585 記法や `X | None` 型構文を
+    使うので、下限を 3.10 以上に置く必要がある
 - `simple_revert >= 1.2.0` (PyPI から取得)
 - 標準ライブラリのみで他は済ませる
 
