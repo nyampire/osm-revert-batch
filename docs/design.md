@@ -33,6 +33,8 @@ Python 側で塞ぐバッチ処理レイヤーを提供する。
 - 一時的エラー (HTTP 429 / 5xx / ネット断) は自動リトライ、雪崩は circuit
   breaker で中断、未処理の changeset は `<input>.remaining.txt` に保存して
   中断地点から再開できる
+- 成功した changeset は `<input>.done.txt` に append し、次回同じ入力で run
+  したときに自動でスキップ（`--retry-done` で無効化可）
 
 ### やらないこと (YAGNI)
 
@@ -85,6 +87,7 @@ osm-revert-batch <input_file> [--comment "..."] [--dry-run] [--out-dir DIR]
 | `--comment "..."` | 全 revert changeset 共通のコメント。省略時は `Reverting {id} by {user}` を自動生成 |
 | `--dry-run` | OAuth せず、`.osc` を per-changeset で `--out-dir` に書き出す |
 | `--out-dir DIR` | dry-run 時の出力先。デフォルト `./osc-out/` |
+| `--retry-done` | `<input>.done.txt` を無視して全件再試行 (append は継続) |
 
 ### 入力ファイル形式
 
@@ -102,7 +105,15 @@ osm-revert-batch <input_file> [--comment "..."] [--dry-run] [--out-dir DIR]
 ## 実行フロー
 
 ```
-1. parse input file → items = [(line_no, changeset_id), ...]
+1. parse input file → raw_items = [(line_no, changeset_id), ...]
+   done = read_done_ids(<input>.done.txt)        # ファイル無ければ空 set
+   if retry_done:
+       items = raw_items
+       skipped = 0
+   else:
+       items = [x for x in raw_items if x[1] not in done]
+       skipped = len(raw_items) - len(items)
+       if skipped: log to stderr: "skipping {skipped} already-done changesets"
 2. if not dry_run:
        auth = read_auth()          # ここで 1 回だけブラウザ認可
 3. consecutive_transient = 0
@@ -123,10 +134,12 @@ osm-revert-batch <input_file> [--comment "..."] [--dry-run] [--out-dir DIR]
                path = out_dir / f'{cs_id}.osc'
                path.write_bytes(changes_to_osc(changes))
                record success(f'dry-run wrote {path}')
+               # dry-run では .done.txt には append しない
            else:
                tags = build_tags(cs_id, ch_users[cs_id], user_comment)
                with_retry(lambda: upload_changes_with_auth(auth, changes, tags))
                record success('uploaded')
+               append_done(<input>.done.txt, cs_id)   # crash-safe 追記
            consecutive_transient = 0
        except RevertError as e:
            record failure(e.message)
@@ -155,6 +168,58 @@ osm-revert-batch <input_file> [--comment "..."] [--dry-run] [--out-dir DIR]
      - 1: 走り切ったが 1 件以上失敗
      - 3: 中断 (circuit break or KeyboardInterrupt)、remaining あり
 ```
+
+## `.done.txt` の semantics
+
+### 目的
+
+同じ入力ファイルで run を繰り返したとき、既に成功した changeset を
+リトライしないようにする。
+
+### 場所と形式
+
+- パス: `<input_file>.done.txt` (入力ファイル名の末尾に `.done.txt` を付ける)
+- 形式: 1 行 1 changeset ID、`#` コメント可 (入力ファイルと同一形式のサブセット)
+- append-only: 成功のたびに 1 行追加、既存内容は書き換えない
+
+例:
+```
+# osm-revert-batch: successful reverts for changesets.txt
+# do not edit; delete this file or use --retry-done to reset
+
+12345
+12346
+# 2026-07-04T12:35:12  ← 任意でタイムスタンプコメントを間に挟んでもよい
+12348
+```
+
+### いつ append するか
+
+**成功時のみ**。以下は append **しない**:
+
+- `RevertError` (redaction / structural change) — 次回また試したい
+  ケースがあるため（例: OSM 側で redaction が解除されるかも）
+- transient 失敗 (429 / 5xx / net) — 次回リトライ対象
+- `--dry-run` 時 — 実 upload していないので done とは呼べない
+
+### いつ読むか
+
+- 通常の run: 起動時に読み、`items` から除外
+- `--dry-run`: 同じく読み、除外する（目視検証は未処理 ID に集中したい）
+- `--retry-done`: 読まない（全件再実行）。ただし append は行う
+
+### crash-safe な追記
+
+- 1 件成功するたびに `open(path, 'a')` → `write(f'{cs_id}\n')` → `flush()`
+- fsync まではしない（実 upload 済みの状態と多少ずれても被害は「次回また試行」だけ）
+- 途中で SIGKILL された場合、書き終えていない ID が次回リトライされる（重複
+  revert）が、simple_revert 側は「差分無し」で無害に処理してくれるので許容
+
+### ユーザ操作
+
+- 全部やり直したい → `.done.txt` を削除、または `--retry-done`
+- 特定 ID だけリトライしたい → `.done.txt` からその行だけ削除
+- 履歴を保持したまま無視 → `--retry-done` (append は継続)
 
 ## リトライと circuit breaker
 
@@ -291,6 +356,16 @@ while True:
 circuit break 時に未処理の changeset ID を同形式で書き出す。ヘッダで中断
 理由と再開コマンド例を残す（上の "remaining.txt のフォーマット" 参照）。
 
+### `read_done_ids(path: Path) -> set[int]`
+
+`.done.txt` を読んで ID の set を返す。ファイル無しなら空 set。パース失敗
+（不正 ID 等）は warning を stderr に出して該当行をスキップし、他は続行。
+
+### `append_done(path: Path, cs_id: int) -> None`
+
+`open(path, 'a')` で 1 行追記して flush。ファイル無ければ新規作成し、
+先頭にコメントヘッダ（生成日時、入力ファイル名）を書く。
+
 ## エラー分類マトリクス
 
 | 由来 | 発生タイミング | classify 出力 | transient? |
@@ -312,6 +387,9 @@ circuit break 時に未処理の changeset ID を同形式で書き出す。ヘ�
 - `test_failure_writer.py`: 書き出した failed.txt をパーサに食わせて ID 復元できる
   round-trip テスト
 - `test_error_classify.py`: RevertError / HTTPError / 汎用例外の分類が期待通り
+- `test_done_skip.py`: `.done.txt` が正しく読まれ、skip 対象が除外される。
+  `--retry-done` で無効化される。append の crash-safe 性 (途中で例外が飛んでも
+  書き終えた ID は次回スキップされる)
 
 ### 手動テスト（マニュアル）
 
