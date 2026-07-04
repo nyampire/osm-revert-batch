@@ -8,9 +8,14 @@ dist/
 
 # runtime output
 osc-out/
+review/
 *.failed.txt
 *.remaining.txt
 *.done.txt
+
+# user working files (input changesets, personal notes)
+/changesets*.txt
+!/changesets.txt.example
 
 # sdd ledger
 .superpowers/

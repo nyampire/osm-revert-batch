@@ -22,13 +22,18 @@ def _write_input(tmp_path: Path, ids: list[int]) -> Path:
 def _make_deps(behaviors: dict[int, str], upload_exc: dict[int, BaseException] | None = None):
     """Build (downloader, reverter, uploader) triples for the run() DI slots.
 
-    behaviors[cs_id] is one of: 'ok', 'no_diffs', 'no_changes', 'download_error:<msg>',
-    'revert_error:<msg>'.
+    behaviors[cs_id] is one of: 'ok', 'no_diffs', 'no_changes', 'download_error:<msg>'.
+
+    'no_diffs' → downloader returns empty (batch.py の empty branch を発火)
+    'no_changes' → downloader OK but reverter returns [] (no_op branch を発火)
     """
     upload_exc = upload_exc or {}
+    # downloader が set し reverter が read する。1 スレッド前提で OK。
+    current_cs: dict[str, int | None] = {"id": None}
 
     def downloader(ids, print_status):
         cs = ids[0]
+        current_cs["id"] = cs
         b = behaviors[cs]
         if b == "no_diffs":
             return {}, {cs: "alice"}
@@ -37,9 +42,10 @@ def _make_deps(behaviors: dict[int, str], upload_exc: dict[int, BaseException] |
         return {("node", "1"): {"changes": True}}, {cs: "alice"}
 
     def reverter(diffs, print_status):
-        # single deterministic behavior derived from the sole caller's context;
-        # for 'no_changes', downloader would have returned diffs but reverter returns []
-        # Real caller sets that via a wrapper below.
+        cs = current_cs["id"]
+        b = behaviors.get(cs, "ok") if cs is not None else "ok"
+        if b == "no_changes":
+            return []
         return [{"type": "node", "id": "1", "version": 5, "deleted": False,
                  "tags": {}, "coords": ("0", "0")}]
 
@@ -211,3 +217,34 @@ def test_run_dry_run_does_not_append_done(tmp_path):
     # osc files were written
     assert (out_dir / "100.osc").exists()
     assert (out_dir / "200.osc").exists()
+
+
+def test_run_success_breakdown(tmp_path):
+    """success の内訳 (uploaded / no_op / empty) を正しくカウントすること。"""
+    ids = [100, 200, 300, 400]
+    p = _write_input(tmp_path, ids)
+    behaviors = {
+        100: "ok",          # → uploaded
+        200: "no_diffs",    # → empty (download が 0 件)
+        300: "no_changes",  # → no_op (revert が空 change を返す)
+        400: "ok",          # → uploaded
+    }
+    dl, rv, up = _make_deps(behaviors)
+
+    opts = RunOptions(input_file=p, comment=None, dry_run=False,
+                      out_dir=tmp_path / "osc", retry_done=False)
+    result = run(opts, auth="fake", downloader=dl, reverter=rv, uploader=up)
+
+    assert result.total == 4
+    assert result.success == 4
+    assert result.uploaded == 2
+    assert result.no_op == 1
+    assert result.empty == 1
+    assert result.uploaded + result.no_op + result.empty == result.success
+
+    # .done.txt には uploaded だけが記録される (no_op/empty は入らない)
+    done_txt = (p.parent / (p.name + ".done.txt")).read_text(encoding="utf-8")
+    assert "100" in done_txt
+    assert "400" in done_txt
+    assert "200" not in done_txt
+    assert "300" not in done_txt

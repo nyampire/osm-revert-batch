@@ -42,6 +42,13 @@ class RunResult:
     total: int = 0
     skipped: int = 0
     success: int = 0
+    # success の内訳 (合計は success)
+    # uploaded = 実際に upload された (dry-run では .osc 出力に相当)
+    # no_op = revert_changes が「変更なし」判定でスキップ (現状 = 復元後 state)
+    # empty = download_changesets が 0 件返した (空 changeset)
+    uploaded: int = 0
+    no_op: int = 0
+    empty: int = 0
     failures: list[tuple[int, str]] = field(default_factory=list)
     remaining: list[int] = field(default_factory=list)
     aborted: bool = False
@@ -106,12 +113,14 @@ def run(
             )
             if not diffs:
                 result.success += 1
+                result.empty += 1
                 consecutive_transient = 0
                 continue
 
             changes = reverter(diffs, print_status)
             if not changes:
                 result.success += 1
+                result.no_op += 1
                 consecutive_transient = 0
                 continue
 
@@ -119,6 +128,7 @@ def run(
                 osc_path = options.out_dir / f"{cs_id}.osc"
                 osc_path.write_bytes(changes_to_osc(changes))
                 result.success += 1
+                result.uploaded += 1  # dry-run では「upload されたはずの件数」に対応
                 # Do NOT append to done.txt in dry-run.
             else:
                 tags = build_tags(cs_id, ch_users.get(cs_id, "?"), options.comment)
@@ -127,6 +137,7 @@ def run(
                     log=log,
                 )
                 result.success += 1
+                result.uploaded += 1
                 append_done(done_path, cs_id)
             consecutive_transient = 0
 

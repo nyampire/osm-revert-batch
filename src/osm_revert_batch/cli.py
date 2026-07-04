@@ -40,6 +40,9 @@ def _print_summary(result: batch.RunResult, log) -> None:
     log(f"Total input:      {result.total} changesets ({result.skipped} skipped via .done.txt)")
     log(f"Processed:        {result.total - result.skipped - len(result.remaining)}")
     log(f"  Succeeded:      {result.success}")
+    log(f"    Uploaded:     {result.uploaded}")
+    log(f"    No-op:        {result.no_op}  (already reverted or current state matches restore target)")
+    log(f"    Empty:        {result.empty}  (changeset had no revertible actions)")
     log(f"  Failed:         {len(result.failures)}")
     if result.aborted:
         at = f"line {result.aborted_at[0]}, cs {result.aborted_at[1]}" if result.aborted_at else "-"
