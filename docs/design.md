@@ -264,8 +264,10 @@ while True:
         attempts += 1
 ```
 
-- HTTP 429 で `Retry-After` ヘッダが付いていればそれを使う。無ければ
-  `BASE_BACKOFF_SECONDS * (2 ** attempts)` (= 1, 2, 4 秒)
+- backoff は常に `BASE_BACKOFF_SECONDS * (2 ** attempts)` (= 1, 2, 4 秒)。
+  `Retry-After` ヘッダは `simple_revert.common.api_request` が
+  response.text しか保持しないため参照不能。将来必要なら api_request の
+  monkey-patch で対応する
 - MAX_RETRIES を使い切っても transient なら例外を上位に投げ、上位ループが
   circuit breaker カウンタを進める
 
