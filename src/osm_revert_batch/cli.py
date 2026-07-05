@@ -44,10 +44,15 @@ def _print_summary(result: batch.RunResult, log) -> None:
     log(f"    No-op:        {result.no_op}  (already reverted or current state matches restore target)")
     log(f"    Empty:        {result.empty}  (changeset had no revertible actions)")
     log(f"  Failed:         {len(result.failures)}")
+    for cs_id, reason in result.failures:
+        log(f"    - {cs_id}: {reason}")
     if result.aborted:
         at = f"line {result.aborted_at[0]}, cs {result.aborted_at[1]}" if result.aborted_at else "-"
         log(f"Aborted at:       {at} ({result.abort_reason})")
         log(f"Remaining:        {len(result.remaining)}")
+        if result.remaining:
+            log(f"  Unattempted IDs: {', '.join(str(cs) for cs in result.remaining[:10])}"
+                + (f" ... (+{len(result.remaining) - 10} more)" if len(result.remaining) > 10 else ""))
     else:
         log("Aborted at:       -")
         log(f"Remaining:        0")
