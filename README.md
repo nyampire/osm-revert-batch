@@ -59,6 +59,17 @@ For input `changesets.txt`:
 | `changesets.txt.failed.txt` | IDs that failed in the last run, with reasons | Overwritten each run |
 | `changesets.txt.remaining.txt` | IDs unattempted due to abort | Written only on abort |
 
+## OAuth token storage
+
+This tool does not store tokens itself, but `simple_revert`'s auth library
+(cli-oauth2) caches the OAuth token in plain JSON at
+`platformdirs.user_config_dir('PythonCliAuth')/tokens.json`
+(macOS: `~/Library/Application Support/PythonCliAuth/tokens.json`) and reuses it
+on later runs, so you may not see a browser prompt at all. The file may be
+created world-readable depending on your umask; restrict it with
+`chmod 600 <path>`. Delete the file to force re-authorization, or revoke the
+app at https://www.openstreetmap.org/oauth2/authorized_applications.
+
 ## Exit codes
 
 | Code | Meaning |

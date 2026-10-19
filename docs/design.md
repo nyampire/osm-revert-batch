@@ -15,7 +15,9 @@
 - **複数 changeset のバッチ処理向けに作られていない**: CLI 引数として複数 ID を
   渡せるが、失敗時の挙動が「途中で例外を投げて終わる」しかない
 - **OAuth が毎回走る**: `simple_revert` を shell から呼ぶと changeset ごとに
-  ブラウザで認可が必要になる
+  ブラウザで認可が必要になる、と当初は想定していた。実際には `simple_revert` が
+  使う cli-oauth2 がトークンをディスクに保存して再利用するため、毎回の認可は
+  起きない（2026-10-19 に確認。詳細は「セキュリティ / リスク」節）
 
 本ツールは `simple_revert` を **ライブラリとして import** し、上記の弱点を
 Python 側で塞ぐバッチ処理レイヤーを提供する。
@@ -40,7 +42,7 @@ Python 側で塞ぐバッチ処理レイヤーを提供する。
 
 - リトライ / バックオフ
 - 並列処理
-- OAuth token のプロセス跨ぎ永続化（毎回ブラウザ認可でよい）
+- 本ツール独自の OAuth token 保存（保存は cli-oauth2 が行う。「セキュリティ / リスク」節を参照）
 - JSON Lines ログ、進捗バー等の付加機能
 - OSM 実 API E2E テスト（副作用が大きすぎるため単体テストのみ）
 - `restore_version` 側のラップ（本ツールは `simple_revert` の changeset revert 専用）
@@ -405,7 +407,18 @@ E2E を自動化しない理由: OSM 本番 API に副作用を残すため、CI
 
 ## セキュリティ / リスク
 
-- **OAuth token**: プロセス内メモリのみ、永続化なし。プロセス終了で破棄
+- **OAuth token**: 本ツールは保存しないが、依存の cli-oauth2 が
+  `platformdirs.user_config_dir('PythonCliAuth')/tokens.json`
+  （macOS では `~/Library/Application Support/PythonCliAuth/tokens.json`）に
+  平文の JSON で保存し、次回以降の起動で再利用する。キーは
+  `{provider}/{client_id}` で、client_id は `simple_revert` に埋め込まれた値なので、
+  `simple_revert` CLI を直接使う場合と同じトークンを共有する。
+  - 新規作成時の権限は umask 依存（022 なら `644`、他ユーザーから読める）。
+    `chmod 600` しておけば、以後の上書き（`open(..., 'w')`）でも権限は維持される
+  - ローカルで無効化したいときはファイルを削除する。次回起動時にブラウザ認可が
+    走り、再び保存される
+  - サーバ側で無効化したいときは OSM の設定画面
+    （https://www.openstreetmap.org/oauth2/authorized_applications）で取り消す
 - **入力ファイルの信頼**: changeset ID は user 指定を全面信頼、追加の allow-list なし
   （個人利用ツールなので）
 - **意図しない大量 revert**: `--dry-run` を安全側デフォルトにはしない
