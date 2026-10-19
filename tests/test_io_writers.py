@@ -44,6 +44,38 @@ def test_write_failed_txt_roundtrip(tmp_path):
     assert [cs for _, cs in got] == [200, 300]
 
 
+def test_write_failed_txt_multiline_reason_roundtrip(tmp_path):
+    # simple_revert の RevertError は "\nFailed to download ..." と改行で始まる。
+    # 改行が `# FAIL:` コメントを途中で切ると parse_input が本文行で落ちる。
+    p = tmp_path / "f.txt"
+    reason = "\nFailed to download the latest version of way 1: Members\nchanged"
+    write_failed_txt(
+        p,
+        source_name="input.txt",
+        total_count=1,
+        success_count=0,
+        failures=[(200, reason)],
+    )
+    got = parse_input(p)
+    assert [cs for _, cs in got] == [200]
+    text = p.read_text(encoding="utf-8")
+    assert "# FAIL: Failed to download the latest version of way 1: Members changed\n" in text
+
+
+def test_write_remaining_txt_multiline_reason_roundtrip(tmp_path):
+    p = tmp_path / "r.txt"
+    write_remaining_txt(
+        p,
+        source_name="input.txt",
+        aborted_at_line=5,
+        aborted_at_cs_id=500,
+        reason="line one\nline two",
+        remaining=[600],
+    )
+    got = parse_input(p)
+    assert [cs for _, cs in got] == [600]
+
+
 def test_write_remaining_txt_basic(tmp_path):
     p = tmp_path / "changesets.txt.remaining.txt"
     write_remaining_txt(

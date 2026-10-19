@@ -29,12 +29,18 @@ def is_transient(exc: BaseException) -> bool:
     return False
 
 
+def _one_line(text: str) -> str:
+    return " ".join(text.split())
+
+
 def classify_error(exc: BaseException) -> str:
-    """Return a short human-readable label for logging and failed.txt."""
+    """Return a short single-line label for logging and failed.txt."""
     if isinstance(exc, HTTPError):
-        return f"HTTP {exc.code}: {exc.message[:200]}"
+        # HTML のエラーページなど複数行の本文を 1 行にしてから切り詰める
+        return f"HTTP {exc.code}: {_one_line(exc.message)[:200]}"
     if isinstance(exc, RevertError):
-        return exc.message
+        # simple_revert は先頭に改行を付けてメッセージを作る
+        return _one_line(exc.message)
     if isinstance(exc, requests.RequestException):
-        return f"Network: {exc}"
-    return f"Unexpected: {type(exc).__name__}: {exc}"
+        return f"Network: {_one_line(str(exc))}"
+    return f"Unexpected: {type(exc).__name__}: {_one_line(str(exc))}"

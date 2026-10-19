@@ -68,6 +68,17 @@ def test_classify_revert(revert_error):
     assert classify_error(revert_error("Cannot revert redactions")) == "Cannot revert redactions"
 
 
+def test_classify_revert_flattens_newlines(revert_error):
+    # simple_revert は先頭に改行を付けて RevertError を作る
+    got = classify_error(revert_error("\nFailed to download way 1: Members\nchanged"))
+    assert got == "Failed to download way 1: Members changed"
+
+
+def test_classify_http_flattens_newlines(http_error):
+    got = classify_error(http_error(503, "<html>\n<h1>Service Unavailable</h1>\n</html>"))
+    assert got == "HTTP 503: <html> <h1>Service Unavailable</h1> </html>"
+
+
 def test_classify_network():
     got = classify_error(requests.ConnectionError("dns fail"))
     assert got.startswith("Network:")
