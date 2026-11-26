@@ -12,8 +12,10 @@ for reverting many OSM changesets from a text file, with:
 
 ## Install
 
+Requires Python 3.12 or later (tested with 3.13.12 and 3.15.2).
+
 ```bash
-python3.12 -m venv .venv
+python3.15 -m venv .venv
 source .venv/bin/activate
 pip install -e .
 ```

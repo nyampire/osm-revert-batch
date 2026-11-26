@@ -69,7 +69,7 @@ osm-revert-batch/
 
 ## 依存
 
-- Python 3.12+ (3.13 でも動作)
+- Python 3.12+（3.13.12 と 3.15.2 で動作確認。2026-11-26 に venv を 3.15.2 へ移行）
   - 3.11 で入った PEP 654 (exception groups) / PEP 657 (traceback 位置情報)、
     3.12 で入った f-string の入れ子改善・型パラメータ構文 (PEP 695) を活用
   - spec 内で `list[tuple[int, int]]` 等の PEP 585 記法や `X | None` 型構文を
