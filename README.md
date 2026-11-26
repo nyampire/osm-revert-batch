@@ -43,6 +43,13 @@ For dry-run (no OAuth, generates `.osc` files for JOSM):
 osm-revert-batch changesets.txt --dry-run --out-dir ./review
 ```
 
+To set the changeset comment (`{id}` and `{user}` are replaced per changeset;
+the default is `Reverting {id} by {user}`):
+
+```bash
+osm-revert-batch changesets.txt --comment "Reverting {id} by {user}. Reason for the revert"
+```
+
 To reset skip state and reattempt everything:
 
 ```bash

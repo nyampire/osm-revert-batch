@@ -59,9 +59,15 @@ class RunResult:
 
 
 def build_tags(cs_id: int, user: str, user_comment: str | None) -> dict[str, str]:
+    if user_comment:
+        # {id} を先に置き換える。逆順だと利用者名に含まれる "{id}" まで置き換わる。
+        # str.format は使わない。コメント中の他の波括弧で例外になるため。
+        comment = user_comment.replace("{id}", str(cs_id)).replace("{user}", user)
+    else:
+        comment = f"Reverting {cs_id} by {user}"
     return {
         "created_by": "simple_revert.py",
-        "comment": user_comment or f"Reverting {cs_id} by {user}",
+        "comment": comment,
     }
 
 

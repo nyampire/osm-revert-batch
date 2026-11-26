@@ -22,7 +22,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("input_file", type=Path,
                    help="Text file, one changeset ID per line, # for comments")
     p.add_argument("--comment", default=None,
-                   help="Shared comment for all revert changesets "
+                   help="Shared comment for all revert changesets; {id} and "
+                        "{user} are replaced per changeset "
                         "(default: 'Reverting {id} by {user}')")
     p.add_argument("--dry-run", action="store_true",
                    help="Do not authenticate or upload; write per-changeset .osc "

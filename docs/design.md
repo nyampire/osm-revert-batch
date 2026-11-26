@@ -86,7 +86,7 @@ osm-revert-batch <input_file> [--comment "..."] [--dry-run] [--out-dir DIR]
 | 引数 / オプション | 意味 |
 |---|---|
 | `<input_file>` | changeset ID を並べたテキストファイル |
-| `--comment "..."` | 全 revert changeset 共通のコメント。省略時は `Reverting {id} by {user}` を自動生成 |
+| `--comment "..."` | 全 revert changeset 共通のコメント。文中の `{id}` と `{user}` は changeset ごとに、revert 対象の ID と作成者名に置き換える。省略時は `Reverting {id} by {user}` を自動生成 |
 | `--dry-run` | OAuth せず、`.osc` を per-changeset で `--out-dir` に書き出す |
 | `--out-dir DIR` | dry-run 時の出力先。デフォルト `./osc-out/` |
 | `--retry-done` | `<input>.done.txt` を無視して全件再試行 (append は継続) |
@@ -312,9 +312,13 @@ while True:
 ```python
 {
     'created_by': 'simple_revert.py',   # 本家互換（既存のレガシー監視等が拾える）
-    'comment': user_comment or f'Reverting {cs_id} by {user}',
+    'comment': (user_comment.replace('{id}', str(cs_id)).replace('{user}', user)
+                if user_comment else f'Reverting {cs_id} by {user}'),
 }
 ```
+
+`user_comment` の置き換えは `{id}` を先に行う。逆順だと、利用者名に `{id}` という文字が含まれるときにそれも置き換わる。
+`str.format` は使わない。コメント中の他の波括弧（`{foo}` や `{}`）で例外になるため。
 
 ### `upload_changes_with_auth(auth, changes, tags) -> None`
 

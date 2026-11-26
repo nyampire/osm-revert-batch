@@ -71,6 +71,21 @@ def test_build_tags_custom_comment():
     assert got["created_by"] == "simple_revert.py"
 
 
+def test_build_tags_custom_comment_fills_id_and_user():
+    got = build_tags(12345, "alice", "Reverting {id} by {user}. Unapproved import.")
+    assert got["comment"] == "Reverting 12345 by alice. Unapproved import."
+
+
+def test_build_tags_custom_comment_keeps_other_braces():
+    got = build_tags(12345, "alice", "see {foo} and {} for {id}")
+    assert got["comment"] == "see {foo} and {} for 12345"
+
+
+def test_build_tags_user_name_is_not_expanded_again():
+    got = build_tags(12345, "{id}", "Reverting {id} by {user}")
+    assert got["comment"] == "Reverting 12345 by {id}"
+
+
 def test_run_all_success(tmp_path):
     ids = [100, 200, 300]
     p = _write_input(tmp_path, ids)
