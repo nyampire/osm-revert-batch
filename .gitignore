@@ -16,6 +16,7 @@ review/
 # user working files (input changesets, personal notes)
 /changesets*.txt
 !/changesets.txt.example
+/docs/handoff/
 
 # sdd ledger
 .superpowers/
